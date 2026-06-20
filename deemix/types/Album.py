@@ -1,4 +1,14 @@
-from deezer.gw import LyricsStatus
+try:
+    from deezer.gw import LyricsStatus
+except ImportError:
+    from enum import IntEnum
+    class LyricsStatus(IntEnum):
+        UNKNOWN = 0
+        NOT_EXPLICIT = 1
+        EXPLICIT = 4
+        PARTIALLY_EXPLICIT = 6
+        EXPLICIT_COVER = 7
+        UNKNOWN_UNRATED = 8
 
 from deemix.utils import removeDuplicateArtists, removeFeatures
 from deemix.types.Artist import Artist
