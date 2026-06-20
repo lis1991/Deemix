@@ -1,7 +1,26 @@
 from deemix.app.downloadjob import DownloadJob
 from deemix.utils import getIDFromLink, getTypeFromLink, getBitrateInt
-from deezer.gw import APIError as gwAPIError, LyricsStatus
-from deezer.api import APIError
+
+try:
+    from deezer.errors import GWAPIError as gwAPIError, APIError
+except ImportError:
+    try:
+        from deezer.exceptions import GWAPIError as gwAPIError, APIError
+    except ImportError:
+        from deezer.gw import APIError as gwAPIError
+        from deezer.api import APIError
+
+try:
+    from deezer.gw import LyricsStatus
+except ImportError:
+    try:
+        from deezer.errors import LyricsStatus
+    except ImportError:
+        class LyricsStatus:
+            UNKNOWN = 0
+            EXPLICIT = 1
+            PARTIALLY_EXPLICIT = 2
+
 from deezer.utils import map_user_playlist
 from spotipy.exceptions import SpotifyException
 from deemix.app.queueitem import QueueItem, QISingle, QICollection, QIConvertable
@@ -24,7 +43,6 @@ class QueueManager:
         self.sp = spotifyHelper
 
     def generateTrackQueueItem(self, dz, id, settings, bitrate, trackAPI=None, albumAPI=None):
-        # Check if is an isrc: url
         if str(id).startswith("isrc"):
             try:
                 trackAPI = dz.api.get_track(id)
@@ -36,7 +54,6 @@ class QueueManager:
             else:
                 return QueueError("https://deezer.com/track/"+str(id), "Track ISRC is not available on deezer", "ISRCnotOnDeezer")
 
-        # Get essential track info
         try:
             trackAPI_gw = dz.gw.get_track_with_fallback(id)
         except gwAPIError as e:
@@ -73,7 +90,6 @@ class QueueManager:
         )
 
     def generateAlbumQueueItem(self, dz, id, settings, bitrate, rootArtist=None):
-        # Get essential album info
         try:
             albumAPI = dz.api.get_album(id)
         except APIError as e:
@@ -82,14 +98,11 @@ class QueueManager:
 
         if str(id).startswith('upc'): id = albumAPI['id']
 
-        # Get extra info about album
-        # This saves extra api calls when downloading
         albumAPI_gw = dz.gw.get_album(id)
         albumAPI['nb_disk'] = albumAPI_gw['NUMBER_DISK']
         albumAPI['copyright'] = albumAPI_gw['COPYRIGHT']
         albumAPI['root_artist'] = rootArtist
 
-        # If the album is a single download as a track
         if albumAPI['nb_tracks'] == 1:
             return self.generateTrackQueueItem(dz, albumAPI['tracks']['data'][0]['id'], settings, bitrate, albumAPI=albumAPI)
 
@@ -126,12 +139,10 @@ class QueueManager:
         )
 
     def generatePlaylistQueueItem(self, dz, id, settings, bitrate):
-        # Get essential playlist info
         try:
             playlistAPI = dz.api.get_playlist(id)
         except:
             playlistAPI = None
-        # Fallback to gw api if the playlist is private
         if not playlistAPI:
             try:
                 userPlaylist = dz.gw.get_playlist_page(id)
@@ -143,13 +154,12 @@ class QueueManager:
                     message += f": {e['DATA_ERROR']}"
                 return QueueError("https://deezer.com/playlist/"+str(id), message)
 
-        # Check if private playlist and owner
         if not playlistAPI.get('public', False) and playlistAPI['creator']['id'] != str(dz.current_user['id']):
             logger.warning("You can't download others private playlists.")
             return QueueError("https://deezer.com/playlist/"+str(id), "You can't download others private playlists.", "notYourPrivatePlaylist")
 
         playlistTracksAPI = dz.gw.get_playlist_tracks(id)
-        playlistAPI['various_artist'] = dz.api.get_artist(5080) # Useful for save as compilation
+        playlistAPI['various_artist'] = dz.api.get_artist(5080)
 
         totalSize = len(playlistTracksAPI)
         playlistAPI['nb_tracks'] = totalSize
@@ -179,7 +189,6 @@ class QueueManager:
         )
 
     def generateArtistQueueItem(self, dz, id, settings, bitrate, interface=None):
-        # Get essential artist info
         try:
             artistAPI = dz.api.get_artist(id)
         except APIError as e:
@@ -187,10 +196,7 @@ class QueueManager:
             return QueueError("https://deezer.com/artist/"+str(id), f"Wrong URL: {e}")
 
         if interface: interface.send("startAddingArtist", {'name': artistAPI['name'], 'id': artistAPI['id']})
-        rootArtist = {
-            'id': artistAPI['id'],
-            'name': artistAPI['name']
-        }
+        rootArtist = {'id': artistAPI['id'], 'name': artistAPI['name']}
 
         artistDiscographyAPI = dz.gw.get_artist_discography_tabs(id, 100)
         allReleases = artistDiscographyAPI.pop('all', [])
@@ -202,7 +208,6 @@ class QueueManager:
         return albumList
 
     def generateArtistDiscographyQueueItem(self, dz, id, settings, bitrate, interface=None):
-        # Get essential artist info
         try:
             artistAPI = dz.api.get_artist(id)
         except APIError as e:
@@ -210,13 +215,10 @@ class QueueManager:
             return QueueError("https://deezer.com/artist/"+str(id)+"/discography", f"Wrong URL: {e}")
 
         if interface: interface.send("startAddingArtist", {'name': artistAPI['name'], 'id': artistAPI['id']})
-        rootArtist = {
-            'id': artistAPI['id'],
-            'name': artistAPI['name']
-        }
+        rootArtist = {'id': artistAPI['id'], 'name': artistAPI['name']}
 
         artistDiscographyAPI = dz.gw.get_artist_discography_tabs(id, 100)
-        artistDiscographyAPI.pop('all', None) # all contains albums and singles, so its all duplicates. This removes them
+        artistDiscographyAPI.pop('all', None)
         albumList = []
         for type in artistDiscographyAPI:
             for album in artistDiscographyAPI[type]:
@@ -226,15 +228,12 @@ class QueueManager:
         return albumList
 
     def generateArtistTopQueueItem(self, dz, id, settings, bitrate, interface=None):
-        # Get essential artist info
         try:
             artistAPI = dz.api.get_artist(id)
         except APIError as e:
             e = str(e)
             return QueueError("https://deezer.com/artist/"+str(id)+"/top_track", f"Wrong URL: {e}")
 
-        # Emulate the creation of a playlist
-        # Can't use generatePlaylistQueueItem as this is not a real playlist
         playlistAPI = {
             'id': str(artistAPI['id'])+"_top_track",
             'title': artistAPI['name']+" - Top Tracks",
@@ -264,7 +263,7 @@ class QueueManager:
         }
 
         artistTopTracksAPI_gw = dz.gw.get_artist_toptracks(id)
-        playlistAPI['various_artist'] = dz.api.get_artist(5080) # Useful for save as compilation
+        playlistAPI['various_artist'] = dz.api.get_artist(5080)
 
         totalSize = len(artistTopTracksAPI_gw)
         playlistAPI['nb_tracks'] = totalSize
@@ -370,7 +369,6 @@ class QueueManager:
             logger.info("Generating queue item for: "+link)
             item = self.generateQueueItem(dz, link, settings, bitrate, interface=interface)
 
-            # Add ack to all items
             if type(item) is list:
                 for i in item:
                     if isinstance(i, QueueItem):
@@ -431,8 +429,6 @@ class QueueManager:
         return True
 
     def nextItem(self, dz, interface=None):
-        # Check that nothing is already downloading and
-        # that the queue is not empty
         if self.currentItem != "": return None
         if not len(self.queue): return None
 
@@ -494,11 +490,7 @@ class QueueManager:
                     qd = json.load(f)
                 except json.decoder.JSONDecodeError:
                     logger.warn("Saved queue is corrupted, resetting it")
-                    qd = {
-                        'queue': [],
-                        'queueComplete': [],
-                        'queueList': {}
-                    }
+                    qd = {'queue': [], 'queueComplete': [], 'queueList': {}}
             remove(configFolder / 'queue.json')
             self.restoreQueue(qd['queue'], qd['queueComplete'], qd['queueList'], settings)
             if interface:
@@ -536,7 +528,6 @@ class QueueManager:
         del self.queueList[uuid]
         if interface: interface.send("removedFromQueue", uuid)
 
-
     def cancelAllDownloads(self, interface=None):
         self.queue = []
         self.queueComplete = []
@@ -546,7 +537,6 @@ class QueueManager:
         for uuid in list(self.queueList.keys()):
             if uuid != self.currentItem: del self.queueList[uuid]
         if interface: interface.send("removedAllDownloads", self.currentItem)
-
 
     def removeFinishedDownloads(self, interface=None):
         for uuid in self.queueComplete:

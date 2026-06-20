@@ -1,12 +1,20 @@
 import time
 import requests
+import json
 
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('deemix')
 
-from deezer.gw import APIError as gwAPIError
-from deezer.api import APIError
+try:
+    from deezer.errors import GWAPIError as gwAPIError, APIError
+except ImportError:
+    try:
+        from deezer.exceptions import GWAPIError as gwAPIError, APIError
+    except ImportError:
+        from deezer.gw import APIError as gwAPIError
+        from deezer.api import APIError
+
 from deemix.utils import removeFeatures, andCommaConcat, removeDuplicateArtists, generateReplayGainString
 from deemix.types.Album import Album
 from deemix.types.Artist import Artist
@@ -111,25 +119,21 @@ class Track:
             self.retriveFilesizes(dz)
 
             self.parseTrackGW(trackAPI_gw)
-            # Get Lyrics data
             if not "LYRICS" in trackAPI_gw and self.lyrics.id != "0":
                 try: trackAPI_gw["LYRICS"] = dz.gw.get_track_lyrics(self.id)
                 except gwAPIError: self.lyrics.id = "0"
             if self.lyrics.id != "0": self.lyrics.parseLyrics(trackAPI_gw["LYRICS"])
 
-            # Parse Album data
             self.album = Album(
                 id = trackAPI_gw['ALB_ID'],
                 title = trackAPI_gw['ALB_TITLE'],
                 pic_md5 = trackAPI_gw.get('ALB_PICTURE')
             )
 
-            # Get album Data
             if not albumAPI:
                 try: albumAPI = dz.api.get_album(self.album.id)
                 except APIError: albumAPI = None
 
-            # Get album_gw Data
             if not albumAPI_gw:
                 try: albumAPI_gw = dz.gw.get_album(self.album.id)
                 except gwAPIError: albumAPI_gw = None
@@ -138,40 +142,30 @@ class Track:
                 self.album.parseAlbum(albumAPI)
             elif albumAPI_gw:
                 self.album.parseAlbumGW(albumAPI_gw)
-                # albumAPI_gw doesn't contain the artist cover
-                # Getting artist image ID
-                # ex: https://e-cdns-images.dzcdn.net/images/artist/f2bc007e9133c946ac3c3907ddc5d2ea/56x56-000000-80-0-0.jpg
                 artistAPI = dz.api.get_artist(self.album.mainArtist.id)
                 self.album.mainArtist.pic.md5 = artistAPI['picture_small'][artistAPI['picture_small'].find('artist/') + 7:-24]
             else:
                 raise AlbumDoesntExists
 
-            # Fill missing data
             if self.album.date and not self.date: self.date = self.album.date
             if not self.album.discTotal: self.album.discTotal = albumAPI_gw.get('NUMBER_DISK', "1")
             if not self.copyright: self.copyright = albumAPI_gw['COPYRIGHT']
             self.parseTrack(trackAPI)
 
-        # Remove unwanted charaters in track name
-        # Example: track/127793
         self.title = ' '.join(self.title.split())
 
-        # Make sure there is at least one artist
         if not len(self.artist['Main']):
             self.artist['Main'] = [self.mainArtist['name']]
 
         self.singleDownload = trackAPI_gw.get('SINGLE_TRACK', False)
         self.position = trackAPI_gw.get('POSITION')
 
-        # Add playlist data if track is in a playlist
         if playlistAPI: self.playlist = Playlist(playlistAPI)
 
         self.generateMainFeatStrings()
         return self
 
     def parseLocalTrackData(self, trackAPI_gw):
-        # Local tracks has only the trackAPI_gw page and
-        # contains only the tags provided by the file
         self.title = trackAPI_gw['SNG_TITLE']
         self.album = Album(title=trackAPI_gw['ALB_TITLE'])
         self.album.pic = Picture(
@@ -180,9 +174,7 @@ class Track:
         )
         self.mainArtist = Artist(name=trackAPI_gw['ART_NAME'])
         self.artists = [trackAPI_gw['ART_NAME']]
-        self.artist = {
-            'Main': [trackAPI_gw['ART_NAME']]
-        }
+        self.artist = {'Main': [trackAPI_gw['ART_NAME']]}
         self.album.artist = self.artist
         self.album.artists = self.artists
         self.album.date = self.date
@@ -244,7 +236,6 @@ class Track:
     def removeDuplicateArtists(self):
         (self.artist, self.artists) = removeDuplicateArtists(self.artist, self.artists)
 
-    # Removes featuring from the title
     def getCleanTitle(self):
         return removeFeatures(self.title)
 
@@ -260,7 +251,6 @@ class Track:
             self.featArtistsString = "feat. "+andCommaConcat(self.artist['Featured'])
 
 class TrackError(Exception):
-    """Base class for exceptions in this module."""
     pass
 
 class AlbumDoesntExists(TrackError):
