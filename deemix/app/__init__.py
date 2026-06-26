@@ -7,6 +7,10 @@ class deemix:
     def __init__(self, configFolder=None, overwriteDownloadFolder=None):
         self.set = Settings(configFolder, overwriteDownloadFolder=overwriteDownloadFolder)
         self.dz = Deezer()
-        self.dz.set_accept_language(self.set.settings.get('tagsLanguage'))
+        lang = self.set.settings.get('tagsLanguage')
+        if lang and hasattr(self.dz, 'set_accept_language'):
+            self.dz.set_accept_language(lang)
+        elif lang and hasattr(self.dz, 'session'):
+            self.dz.session.headers.update({'Accept-Language': lang})
         self.sp = SpotifyHelper(configFolder)
         self.qm = QueueManager(self.sp)
