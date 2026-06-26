@@ -1,11 +1,8 @@
-import eventlet
 import json
 from pathlib import Path
 
-eventlet.import_patched('requests.adapters')
-
-spotipy = eventlet.import_patched('spotipy')
-SpotifyClientCredentials = spotipy.oauth2.SpotifyClientCredentials
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 from deemix.utils.localpaths import getConfigFolder
 from deemix.app.queueitem import QIConvertable
 
